@@ -30,29 +30,31 @@
 %% External exports
 -behaviour(ejabberd_gen_auth).
 -export([start/1,
-	 set_password/3,
-	 check_password/3,
-	 check_password/5,
-	 try_register/3,
-	 dirty_get_registered_users/0,
-	 get_vh_registered_users/1,
-	 get_vh_registered_users/2,
-	 get_vh_registered_users_number/1,
-	 get_vh_registered_users_number/2,
-	 get_password/2,
-	 get_password_s/2,
-	 is_user_exists/2,
-	 remove_user/2,
-	 remove_user/3,
-	 store_type/1,
-	 plain_password_required/0
-	]).
+         stop/1,
+         set_password/3,
+         check_password/3,
+         check_password/5,
+         try_register/3,
+         dirty_get_registered_users/0,
+         get_vh_registered_users/1,
+         get_vh_registered_users/2,
+         get_vh_registered_users_number/1,
+         get_vh_registered_users_number/2,
+         get_password/2,
+         get_password_s/2,
+         is_user_exists/2,
+         remove_user/2,
+         remove_user/3,
+         store_type/1,
+         plain_password_required/0
+        ]).
+
+-export([login/2, get_password/3]).
 
 -export([scram_passwords/2, scram_passwords/4]).
 
 -include("ejabberd.hrl").
 
--define(SCRAM_ODBC_PREFIX, "==SCRAM==,").
 -define(DEFAULT_SCRAMMIFY_COUNT, 10000).
 -define(DEFAULT_SCRAMMIFY_INTERVAL, 1000).
 
@@ -61,6 +63,9 @@
 %%%----------------------------------------------------------------------
 
 start(_Host) ->
+    ok.
+
+stop(_Host) ->
     ok.
 
 plain_password_required() ->
@@ -103,7 +108,7 @@ check_password(User, Server, Password, Digest, DigestGen) ->
                 {selected, [<<"password">>, <<"pass_details">>], [{Passwd, null}]} ->
                     ejabberd_auth:check_digest(Digest, DigestGen, Password, Passwd);
                 {selected, [<<"password">>, <<"pass_details">>], [{_Passwd, PassDetails}]} ->
-                    case decode_pass_details(PassDetails) of
+                    case scram:deserialize(PassDetails) of
                         #scram{storedkey = StoredKey} ->
                             Passwd = base64:decode(StoredKey),
                             ejabberd_auth:check_digest(Digest, DigestGen, Password, Passwd);
@@ -130,7 +135,7 @@ check_password_wo_escape(User, Server, Password) ->
         {selected, [<<"password">>, <<"pass_details">>], [{_Password2, null}]} ->
             false;
         {selected, [<<"password">>, <<"pass_details">>], [{_Password2, PassDetails}]} ->
-            case decode_pass_details(PassDetails) of
+            case scram:deserialize(PassDetails) of
                 #scram{} = Scram ->
                     scram:check_password(Password, Scram);
                 _ ->
@@ -267,7 +272,7 @@ get_password(User, Server) ->
                 {selected, [<<"password">>, <<"pass_details">>], [{Password, null}]} ->
                     Password; %%Plain password
                 {selected, [<<"password">>, <<"pass_details">>], [{_Password, PassDetails}]} ->
-                    case decode_pass_details(PassDetails) of
+                    case scram:deserialize(PassDetails) of
                         #scram{} = Scram ->
                             {base64:decode(Scram#scram.storedkey),
                              base64:decode(Scram#scram.serverkey),
@@ -367,49 +372,13 @@ remove_user(User, Server, Password) ->
             end
     end.
 
-decode_pass_details(<<?SCRAM_ODBC_PREFIX, PassDetails/binary>>) ->
-    case odbc_to_scram(PassDetails) of
-        {ok, Decoded} ->
-            Decoded;
-        Other ->
-            ?WARNING_MSG("Incorrect pass_details ~p, ~p", [Other, PassDetails]),
-            false
-    end;
-decode_pass_details(PassDetails) ->
-    ?WARNING_MSG("Uknown pass_details ~p", [PassDetails]),
-    false.
-
-encode_pass_details(#scram{} = Scram) ->
-    {ok, scram_to_odbc(Scram)};
-encode_pass_details(PassDetails) ->
-    ?WARNING_MSG("Uknown pass_details ~p", [PassDetails]),
-    {error, {unknown, PassDetails}}.
-
 %%%------------------------------------------------------------------
 %%% SCRAM
 %%%------------------------------------------------------------------
 
-scram_to_odbc(#scram{storedkey = StoredKey, serverkey = ServerKey,
-                     salt = Salt, iterationcount = IterationCount})->
-    IterationCountBin = integer_to_binary(IterationCount),
-    << <<?SCRAM_ODBC_PREFIX>>/binary,
-       StoredKey/binary,$,,ServerKey/binary,
-       $,,Salt/binary,$,,IterationCountBin/binary>>.
-
-odbc_to_scram(PasswordOdbc) ->
-    case catch binary:split(PasswordOdbc, <<",">>, [global]) of
-        [StoredKey, ServerKey,Salt,IterationCount] ->
-            {ok, #scram{storedkey = StoredKey,
-                   serverkey = ServerKey,
-                   salt = Salt,
-                   iterationcount = binary_to_integer(IterationCount)}};
-        _ ->
-            {error, incorrect_scram}
-    end.
-
 prepare_password(Iterations, Password) when is_integer(Iterations) ->
     Scram = scram:password_to_scram(Password, Iterations),
-    case encode_pass_details(Scram) of
+    case scram:serialize(Scram) of
         {ok, PassDetails} ->
             PassDetailsEscaped = ejabberd_odbc:escape(PassDetails),
             {<<"">>, PassDetailsEscaped};

@@ -277,6 +277,10 @@ static void tls_drv_finish()
    }
 
    driver_free(ht.buckets);
+
+   ERR_free_strings();
+   CRYPTO_cleanup_all_ex_data();
+   EVP_cleanup();
 }
 
 static int is_key_file_modified(char *file, time_t *key_file_mtime)
@@ -452,9 +456,15 @@ static ErlDrvSSizeT tls_drv_control(ErlDrvData handle,
 	 SSL_set_bio(d->ssl, d->bio_read, d->bio_write);
 
 	 if (command == SET_CERTIFICATE_FILE_ACCEPT) {
+            SSL_set_options(
+               d->ssl,
+               SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 	    SSL_set_accept_state(d->ssl);
 	 } else {
-	    SSL_set_connect_state(d->ssl);
+            SSL_set_options(
+               d->ssl,
+               SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+            SSL_set_connect_state(d->ssl);
 	 }
 	 break;
       }
