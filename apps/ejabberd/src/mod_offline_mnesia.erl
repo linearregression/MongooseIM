@@ -32,9 +32,9 @@
 -export([init/2,
          pop_messages/2,
          write_messages/4,
-	     remove_expired_messages/1,
-	     remove_old_messages/2,
-	     remove_user/2]).
+         remove_expired_messages/1,
+         remove_old_messages/2,
+         remove_user/2]).
 
 -include("ejabberd.hrl").
 -include("jlib.hrl").
