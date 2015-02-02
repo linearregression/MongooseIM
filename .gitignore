@@ -79,3 +79,4 @@ apps/ejabberd/ebin/ejabberd.app
 dev/*
 test/*
 ebin/
+*.coverdata

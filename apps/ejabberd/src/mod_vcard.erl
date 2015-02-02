@@ -100,7 +100,7 @@
 %% gen_mod callbacks
 %%--------------------------------------------------------------------
 start(VHost, Opts) ->
-    start_backend_module(Opts),
+    gen_mod:start_backend_module(?MODULE, Opts),
     Proc = gen_mod:get_module_proc(VHost,?PROCNAME),
     ChildSpec = {Proc, {?MODULE, start_link, [VHost,Opts]},
                  transient, 1000, worker, [?MODULE]},
@@ -123,6 +123,8 @@ init([VHost, Opts]) ->
     ?BACKEND:init(VHost, Opts),
 
     ejabberd_hooks:add(remove_user, VHost,
+                       ?MODULE, remove_user, 50),
+    ejabberd_hooks:add(anonymous_purge_hook, VHost,
                        ?MODULE, remove_user, 50),
     ejabberd_hooks:add(disco_local_features, VHost,
                        ?MODULE, get_local_features,50),
@@ -155,6 +157,7 @@ terminate(_Reason, State) ->
             ok
     end,
     ejabberd_hooks:delete(remove_user, VHost, ?MODULE, remove_user, 50),
+    ejabberd_hooks:delete(anonymous_purge_hook, VHost, ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_local, VHost, ?NS_VCARD),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, VHost, ?NS_VCARD),
     ejabberd_hooks:delete(host_config_update, VHost, ?MODULE, config_change, 50),
@@ -278,24 +281,6 @@ config_change(Acc, Host, ldap, _NewConfig) ->
     Acc;
 config_change(Acc, _, _, _) ->
     Acc.
-%% ------------------------------------------------------------------
-%% Dynamic modules
-%% ------------------------------------------------------------------
-start_backend_module(Opts) ->
-    Backend = gen_mod:get_opt(backend, Opts, mnesia),
-    {Mod, Code} = dynamic_compile:from_string(mod_vcard_backend(Backend)),
-    code:load_binary(Mod, "mod_vcard_backend.erl", Code).
-
--spec mod_vcard_backend(atom()) -> string().
-mod_vcard_backend(Backend) when is_atom(Backend) ->
-    lists:flatten(
-      ["-module(mod_vcard_backend).
-       -export([backend/0]).
-       -spec backend() -> atom().
-       backend() ->
-       mod_vcard_",
-       atom_to_list(Backend),
-       ".\n"]).
 
 %% ------------------------------------------------------------------
 %% Internal

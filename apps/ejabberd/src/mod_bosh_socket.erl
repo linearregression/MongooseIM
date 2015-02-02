@@ -54,7 +54,9 @@
 -type cached_response() :: {rid(), erlang:timestamp(), jlib:xmlel()}.
 -type rid() :: pos_integer().
 
--record(state, {c2s_pid         :: pid(),
+-record(state, {from            :: binary(),
+                to              :: binary(),
+                c2s_pid         :: pid(),
                 handlers = []   :: [{rid(), reference(), pid()}],
                 %% Elements buffered for sending to the client.
                 pending = []    :: [jlib:xmlstreamel()],
@@ -225,9 +227,8 @@ normal(Event, State) ->
     ?DEBUG("Unhandled event in 'normal' state: ~w~n", [Event]),
     {next_state, normal, State}.
 
-
 closing(Event, State) ->
-    ?DEBUG("Unhandled event in 'normal' state: ~w~n", [Event]),
+    ?DEBUG("Unhandled event in 'closing' state: ~w~n", [Event]),
     {next_state, closing, State}.
 
 %%--------------------------------------------------------------------
@@ -386,8 +387,9 @@ handle_info({wait_timeout, {Rid, Pid}}, SName,
         false ->
             {next_state, SName, S};
         {value, {Rid, _, Pid}, NewHandlers} ->
-            NS = send_to_handler({Rid, Pid}, [], S),
-            {next_state, SName, NS#state{handlers = NewHandlers}}
+            NS = send_to_handler({Rid, Pid}, [],
+                                 S#state{handlers = NewHandlers}),
+            {next_state, SName, NS}
     end;
 handle_info(Info, SName, State) ->
     ?DEBUG("Unhandled info in '~s' state: ~w~n", [SName, Info]),
@@ -804,22 +806,30 @@ return_surplus_handlers(SName, #state{pending = Pending} = S)
     return_surplus_handlers(normal, NS).
 
 
--spec bosh_unwrap(EventTag :: mod_bosh:event_type(), jlib:xmlel(), state()
-                 ) -> {[jlib:xmlstreamel()], state()}.
+-spec bosh_unwrap(EventTag :: mod_bosh:event_type(), jlib:xmlel(), state())
+   -> {[jlib:xmlstreamel()], state()}.
 bosh_unwrap(StreamEvent, Body, #state{} = S)
-       when StreamEvent =:= streamstart;
-            StreamEvent =:= restart ->
+  when StreamEvent =:= streamstart ->
     Wait = min(get_attr(<<"wait">>, Body, S#state.wait), mod_bosh:get_max_wait()),
     Hold = get_attr(<<"hold">>, Body, S#state.hold),
     ClientAcks = get_client_acks(StreamEvent, Body, S#state.client_acks),
-    E = stream_start(exml_query:attr(Body, <<"from">>),
-                     exml_query:attr(Body, <<"to">>)),
+    From = exml_query:attr(Body, <<"from">>),
+    To = exml_query:attr(Body, <<"to">>),
+    E = stream_start(From, To),
     {[E], record_set(S, [{#state.wait, Wait},
                          {#state.hold, Hold},
-                         {#state.client_acks, ClientAcks}])};
+                         {#state.client_acks, ClientAcks},
+                         {#state.from, From},
+                         {#state.to, To}])};
+
+bosh_unwrap(StreamEvent, _Body, #state{} = S)
+  when StreamEvent =:= restart ->
+    {[stream_start(S#state.from, S#state.to)], S};
+
 bosh_unwrap(streamend, Body, State) ->
     {Els, NewState} = bosh_unwrap(normal, Body, State),
     {Els ++ [#xmlstreamend{name = <<>>}], NewState};
+
 bosh_unwrap(normal, Body, #state{sid = Sid} = State) ->
     Sid = exml_query:attr(Body, <<"sid">>),
     ?NS_HTTPBIND = exml_query:attr(Body, <<"xmlns">>),

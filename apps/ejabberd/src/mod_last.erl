@@ -82,7 +82,7 @@
 start(Host, Opts) ->
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue),
 
-    start_backend_module(Opts),
+    gen_mod:start_backend_module(?MODULE, Opts),
     ?BACKEND:init(Host, Opts),
 
     gen_iq_handler:add_iq_handler(ejabberd_local, Host,
@@ -91,6 +91,8 @@ start(Host, Opts) ->
         ?NS_LAST, ?MODULE, process_sm_iq, IQDisc),
     ejabberd_hooks:add(remove_user, Host, ?MODULE,
         remove_user, 50),
+    ejabberd_hooks:add(anonymous_purge_hook, Host,
+        ?MODULE, remove_user, 50),
     ejabberd_hooks:add(unset_presence_hook, Host, ?MODULE,
         on_presence_update, 50).
 
@@ -98,33 +100,14 @@ start(Host, Opts) ->
 stop(Host) ->
     ejabberd_hooks:delete(remove_user, Host, ?MODULE,
         remove_user, 50),
+    ejabberd_hooks:delete(anonymous_purge_hook, Host,
+        ?MODULE, remove_user, 50),
     ejabberd_hooks:delete(unset_presence_hook, Host,
         ?MODULE, on_presence_update, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_local, Host,
         ?NS_LAST),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host,
         ?NS_LAST).
-
-%% ------------------------------------------------------------------
-%% Dynamic modules
-
-start_backend_module(Opts) ->
-    Backend = gen_mod:get_opt(backend, Opts, mnesia),
-    {Mod, Code} = dynamic_compile:from_string(mod_last_backend(Backend)),
-    code:load_binary(Mod, "mod_last_backend.erl", Code).
-
--spec mod_last_backend(atom()) -> string().
-mod_last_backend(Backend) when is_atom(Backend) ->
-    lists:flatten(
-        ["-module(mod_last_backend).
-        -export([backend/0]).
-
-        -spec backend() -> atom().
-        backend() ->
-            mod_last_",
-            atom_to_list(Backend),
-            ".\n"]).
-
 
 %%%
 %%% Uptime of ejabberd node
@@ -245,15 +228,13 @@ count_active_users(LServer, Timestamp, Comparator) ->
 
 -spec on_presence_update(ejabberd:user(), ejabberd:server(), ejabberd:resource(),
                          Status :: binary()) -> {'aborted',_} | {'atomic',_}.
-on_presence_update(User, Server, _Resource, Status) ->
-    TimeStamp = now_to_seconds(now()),
-    store_last_info(User, Server, TimeStamp, Status).
+on_presence_update(LUser, LServer, _Resource, Status) ->
+    TimeStamp = now_to_seconds(os:timestamp()),
+    store_last_info(LUser, LServer, TimeStamp, Status).
 
 -spec store_last_info(ejabberd:user(), ejabberd:server(), erlang:timestamp(),
                       Status :: binary()) -> {'aborted',_} | {'atomic',_}.
-store_last_info(User, Server, TimeStamp, Status) ->
-    LUser = jlib:nodeprep(User),
-    LServer = jlib:nameprep(Server),
+store_last_info(LUser, LServer, TimeStamp, Status) ->
     ?BACKEND:set_last_info(LUser, LServer, TimeStamp, Status).
 
 -spec get_last_info(ejabberd:luser(), ejabberd:lserver())

@@ -34,7 +34,8 @@
          add_local_option/2,
          get_local_option/1,
          get_local_option/2,
-         del_local_option/1]).
+         del_local_option/1,
+         get_local_option_or_default/2]).
 -export([get_vh_by_auth_method/1]).
 -export([is_file_readable/1]).
 
@@ -745,6 +746,15 @@ get_local_option(Opt, Host) ->
         Val -> Val
     end.
 
+-spec get_local_option_or_default(key(), value()) -> value().
+get_local_option_or_default(Opt, Default) ->
+    case get_local_option(Opt) of
+        undefined ->
+            Default;
+        Value ->
+            Value
+    end.
+
 %% @doc Return the list of hosts handled by a given module
 get_vh_by_auth_method(AuthMethod) ->
     mnesia:dirty_select(local_config,
@@ -1263,11 +1273,11 @@ get_key_group(_, Key) when is_atom(Key)->
                     ValuePos :: non_neg_integer()) -> compare_result().
 compare_terms(OldTerms, NewTerms, KeyPos, ValuePos)
   when is_integer(KeyPos), is_integer(ValuePos) ->
-    {ToStop, ToReload} = lists:foldl(pa:binary(fun find_modules_to_change/5,
-                                               [KeyPos, NewTerms, ValuePos]),
+    {ToStop, ToReload} = lists:foldl(pa:bind(fun find_modules_to_change/5,
+                                             KeyPos, NewTerms, ValuePos),
                                      {[], []}, OldTerms),
-    ToStart = lists:foldl(pa:binary(fun find_modules_to_start/4,
-                                    [KeyPos, OldTerms]), [], NewTerms),
+    ToStart = lists:foldl(pa:bind(fun find_modules_to_start/4,
+                                  KeyPos, OldTerms), [], NewTerms),
     #compare_result{to_start  = ToStart,
                     to_stop   = ToStop,
                     to_reload = ToReload}.

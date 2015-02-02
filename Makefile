@@ -1,29 +1,31 @@
-.PHONY: rel deps test show_test_results generate_snmp_header
+.PHONY: rel deps test show_test_results
 
 EJABBERD_DIR = apps/ejabberd
 EJD_INCLUDE = $(EJABBERD_DIR)/include
 EJD_PRIV = $(EJABBERD_DIR)/priv
-EJD_PRIV_MIB = $(EJD_PRIV)/mibs
-EJD_MIB = $(EJABBERD_DIR)/mibs
 DEVNODES = node1 node2
 
 all: deps compile
 
-compile: rebar generate_snmp_header
-	./rebar compile
+compile: rebar
+	./rebar $(OTPS) compile
 
-deps: rebar generate_snmp_header
+deps: rebar
 	./rebar get-deps
 
 clean: rebar
 	./rebar clean
 
 quick_compile: rebar
-	./rebar compile skip_deps=true
+	./rebar $(OPTS) compile skip_deps=true
 
 reload: quick_compile
 	@E=`ls ./rel/mongooseim/lib/ | grep ejabberd-2 | sort -r | head -n 1` ;\
 	rsync -uW ./apps/ejabberd/ebin/*beam ./rel/mongooseim/lib/$$E/ebin/ ;\
+
+reload_dev: quick_compile
+	@E=`ls ./dev/mongooseim_node1/lib/ | grep ejabberd-2 | sort -r | head -n 1` ;\
+	rsync -uW ./apps/ejabberd/ebin/*beam ./dev/mongooseim_node1/lib/$$E/ebin/ ;\
 
 ct: deps quick_compile
 	@if [ "$(SUITE)" ]; then ./rebar -q ct suite=$(SUITE) skip_deps=true;\
@@ -38,11 +40,18 @@ test_preset: test_deps
 
 run: deps compile quickrun
 
-quickrun:
-	erl -sname ejabberd -setcookie ejabberd -pa deps/*/ebin apps/*/ebin -config rel/files/app.run.config -s ejabberd -s sync
+quickrun: etc/ejabberd.cfg
+	erl -sname mongooseim@localhost -setcookie ejabberd -pa deps/*/ebin apps/*/ebin -config rel/files/app.config -s ejabberd
+
+etc/ejabberd.cfg:
+	tools/generate_cfg.es etc/ejabberd.cfg
+
 
 cover_test: test_deps
 	cd test/ejabberd_tests; make cover_test
+
+cover_test_preset: test_deps
+	cd test/ejabberd_tests; make cover_test_preset
 
 quicktest: test_deps
 	cd test/ejabberd_tests; make quicktest
@@ -54,6 +63,9 @@ eunit: rebar deps
 	./rebar compile
 	./rebar skip_deps=true eunit
 
+configure:
+	./tools/configure $(filter-out $@,$(MAKECMDGOALS))
+
 rel: rebar deps
 	./rebar compile generate -f
 
@@ -62,12 +74,7 @@ devrel: $(DEVNODES)
 $(DEVNODES): rebar deps compile deps_dev
 	@echo "building $@"
 	(cd rel && ../rebar generate -f target_dir=../dev/mongooseim_$@ overlay_vars=./reltool_vars/$@_vars.config)
-	cp apps/ejabberd/src/*.erl `ls -dt dev/mongooseim_$@/lib/ejabberd-2.1.8*/ebin/ | head -1`
-ifeq ($(shell uname), Linux)
-	cp -R `dirname $(shell readlink -f $(shell which erl))`/../lib/tools-* dev/mongooseim_$@/lib/
-else
-	cp -R `which erl`/../../lib/tools-* dev/mongooseim_$@/lib/
-endif
+	cp -R `dirname $(shell ./readlink.sh $(shell which erl))`/../lib/tools-* dev/mongooseim_$@/lib/
 
 deps_dev:
 	mkdir -p dev
@@ -77,13 +84,8 @@ deps_dev:
 devclean:
 	rm -rf dev/*
 
-generate_snmp_header: apps/ejabberd/include/EJABBERD-MIB.hrl
-
-$(EJD_INCLUDE)/EJABBERD-MIB.hrl: $(EJD_PRIV_MIB)/EJABBERD-MIB.bin
-	erlc -o $(EJD_INCLUDE) $<
-
-$(EJD_PRIV_MIB)/EJABBERD-MIB.bin: $(EJD_MIB)/EJABBERD-MIB.mib $(EJD_MIB)/EJABBERD-MIB.funcs
-	erlc -o $(EJD_PRIV_MIB) $<
+cover_report: /tmp/mongoose_combined.coverdata
+	erl -noshell -pa apps/*/ebin deps/*/ebin -eval 'ecoveralls:travis_ci("$?"), init:stop()'
 
 relclean:
 	rm -rf rel/mongooseim
@@ -114,7 +116,12 @@ cleanplt:
 test_deps: rebar
 	./rebar -C rebar.tests.config get-deps
 
+
 # This might download a version which can't build the project properly!
 # Compatible rebar version should be checked into the repository.
 rebar:
 	@if \[ ! -z ./rebar \]; then wget http://cloud.github.com/downloads/basho/rebar/rebar; chmod u+x rebar; fi
+
+%:
+	@:
+

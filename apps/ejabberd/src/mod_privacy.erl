@@ -114,7 +114,7 @@
 %% ------------------------------------------------------------------
 
 start(Host, Opts) ->
-    start_backend_module(Opts),
+    gen_mod:start_backend_module(?MODULE, Opts),
     ?BACKEND:init(Host, Opts),
     IQDisc = gen_mod:get_opt(iqdisc, Opts, one_queue),
     ejabberd_hooks:add(privacy_iq_get, Host,
@@ -129,6 +129,8 @@ start(Host, Opts) ->
                ?MODULE, updated_list, 50),
     ejabberd_hooks:add(remove_user, Host,
                ?MODULE, remove_user, 50),
+    ejabberd_hooks:add(anonymous_purge_hook, Host,
+        ?MODULE, remove_user, 50),
     gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PRIVACY,
                   ?MODULE, process_iq, IQDisc).
 
@@ -145,26 +147,9 @@ stop(Host) ->
               ?MODULE, updated_list, 50),
     ejabberd_hooks:delete(remove_user, Host,
               ?MODULE, remove_user, 50),
+    ejabberd_hooks:delete(anonymous_purge_hook, Host,
+        ?MODULE, remove_user, 50),
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PRIVACY).
-
-%% Dynamic modules
-%% ------------------------------------------------------------------
-
-start_backend_module(Opts) ->
-    Backend = gen_mod:get_opt(backend, Opts, mnesia),
-    {Mod, Code} = dynamic_compile:from_string(mod_privacy_backend(Backend)),
-    code:load_binary(Mod, "mod_privacy_backend.erl", Code).
-
--spec mod_privacy_backend(atom()) -> string().
-mod_privacy_backend(Backend) when is_atom(Backend) ->
-    lists:flatten(
-      ["-module(mod_privacy_backend).
-        -export([backend/0]).
-        -spec backend() -> atom().
-        backend() ->
-        mod_privacy_",
-           atom_to_list(Backend),
-           ".\n"]).
 
 %% Handlers
 %% ------------------------------------------------------------------
