@@ -29,7 +29,9 @@ branches:
 notifications:
         email: mongoose-im@erlang-solutions.com
 otp_release:
-        - 17
+        - 17.3
+        - 17.1
+        - 17.0
 
 env:
         - PRESET=internal_redis DB=mnesia REL_CONFIG=with-redis
@@ -43,6 +45,6 @@ env:
 matrix:
     fast_finish: true
     include:
-        - otp_release: 17
+        - otp_release: 17.0
           env: PRESET=internal_mnesia DB=mnesia
 
