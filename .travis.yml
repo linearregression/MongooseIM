@@ -42,6 +42,8 @@ env:
         - PRESET=external_mnesia DB=mnesia
 
 matrix:
+    fast_finish: true
     include:
-        - otp_release: R15B03
+        - otp_release: 17
           env: PRESET=internal_mnesia DB=mnesia
+
