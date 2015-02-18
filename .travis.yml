@@ -27,7 +27,7 @@ branches:
         only:
                 - master
 notifications:
-        email: mongoose-im@erlang-solutions.com
+        email: linearregression@example.com
 otp_release:
         - R16B01
         - R16B02
