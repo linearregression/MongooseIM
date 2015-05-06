@@ -53,4 +53,8 @@ matrix:
     include:
         - otp_release: 17.0
           env: PRESET=internal_mnesia DB=mnesia
+        - otp_release: R15B03
+          env: PRESET=internal_mnesia DB=mnesia
+        - otp_release: 17.4
+          env: PRESET=internal_mnesia DB=mnesia
 

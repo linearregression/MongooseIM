@@ -10,7 +10,7 @@ The module can be especially useful for users maintaining their own, central use
 
 ### How to enable
 
-For full reference please check [Advanced-configuration#authentication](Advanced-configuration.md#authentication). The simplest way is to just replace default `auth_method` option in `rel/files/ejabberd.cfg` with `{auth_method, http}`.
+For full reference please check [Advanced-configuration#authentication](../Advanced-configuration.md#authentication). The simplest way is to just replace default `auth_method` option in `rel/files/ejabberd.cfg` with `{auth_method, http}`.
 
 Enabling the module **is not enough!** Please follow instructions below.
 
@@ -19,8 +19,8 @@ Enabling the module **is not enough!** Please follow instructions below.
 `ejabberd_auth_http` requires some parameters to function properly. The following options can be set in `auth_opts` tuple in `rel/files/ejabberd.cfg`:
 
 * `host` (mandatory, `string`) - consists of protocol, hostname (or IP) and port (optional). Examples:
-  * `{host, "http://localhost:12000"}`
-  * `{host, "https://10.20.30.40"}`
+    * `{host, "http://localhost:12000"}`
+    * `{host, "https://10.20.30.40"}`
 * `connection_pool_size` (optional, `integer`, default: 10) - the number of connections open to auth service
 * `connection_opts` (optional, default: `[]`) - extra options for hackers: http://erlang.org/doc/man/gen_tcp.html#type-connect_option
 * `basic_auth` (optional, default: `""`) - HTTP Basic Authentication in format `"username:password"`; auth service doesn't have to require authentication for HTTP auth to work
@@ -41,8 +41,6 @@ All GET requests include the following URL-encoded query string: `?user=<usernam
 All POST requests have the following URL-encoded string in the request body: `user=<username>&server=<domain>&pass=<password>`.
 
 If certain method does not need a password, the value of `pass` is **undefined**, so it shouldn't be used.
-
-If specific value is expected in response body, it MUST NOT be put in quotes!
 
 For the best integration, the return code range should not exceed the list below:
 
@@ -65,8 +63,8 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** GET
 * **Type:** mandatory when SCRAM is not used
 * **Return values:**
-  * 200, "true" or "false" in body
-  * anything else - will be treated as "false"
+    * 200, `true` or `false` in body
+    * anything else - will be treated as `false`
 * **Description:** Must respond if the password is valid for user.
 
 ### `get_password`
@@ -74,8 +72,8 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** GET
 * **Type:** mandatory when SCRAM or DIGEST SASL mechanism is used
 * **Return values:**
-  * 200, password in the body
-  * anything else - `get_password` will fail
+    * 200, password in the body
+    * anything else - `get_password` will fail
 * **Description:** Must return the user's password in plaintext or in the SCRAM serialised form.
 
 ### `user_exists`
@@ -83,8 +81,8 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** GET
 * **Type:** mandatory
 * **Return values:**
-  * 200, "true" or "false" in body
-  * anything else - will be treated as "false"
+    * 200, `true` or `false` in body
+    * anything else - will be treated as `false`
 * **Description:** Must return the information whether the user exists in DB.
 
 ### `set_password`
@@ -92,8 +90,8 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** POST
 * **Type:** mandatory when `mod_register` is enabled
 * **Return values:**
-  * 200 or 201 or 204 - success
-  * anything else - will be treated as "false"
+    * 200 or 201 or 204 - success
+    * anything else - will be treated as `false`
 * **Description:** Must set user's password in the internal database to a provided value. The value should not be transformed (except for URL-decoding) before writing into DB.
 
 ### `remove_user`
@@ -101,10 +99,10 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** POST
 * **Type:** mandatory when `mod_register` is enabled
 * **Return values:**
-  * 200 or 201 or 204 - success
-  * 404 - user does not exist
-  * 403 - not allowed for some reason
-  * 40X - will be treated as "bad request"
+    * 200 or 201 or 204 - success
+    * 404 - user does not exist
+    * 403 - not allowed for some reason
+    * 40X - will be treated as `bad request`
 * **Description:** Removes a user account.
 
 ### `remove_user_validate`
@@ -112,10 +110,10 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** POST
 * **Type:** mandatory when `mod_register` is enabled
 * **Return values:**
-  * 200 or 201 or 204 - success
-  * 404 - user does not exist
-  * 403 - invalid user password or not allowed for other reason
-  * 40X - will be treated as "bad request"
+    * 200 or 201 or 204 - success
+    * 404 - user does not exist
+    * 403 - invalid user password or not allowed for other reason
+    * 40X - will be treated as `bad request`
 * **Description:** Removes a user account only if provided password is valid.
 
 ### `register`
@@ -123,9 +121,9 @@ Some requests consider multiple return codes a "success". It is up to the server
 * **Method:** POST
 * **Type:** mandatory when `mod_register` is enabled
 * **Return values:**
-  * 201 - success
-  * 409 - user already exists
-  * anything else - will be treated as failure
+    * 201 - success
+    * 409 - user already exists
+    * anything else - will be treated as failure
 * **Description:** Creates a user account.
 
 ## Authentication service API recipes

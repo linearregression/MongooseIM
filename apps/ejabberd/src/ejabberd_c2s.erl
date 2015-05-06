@@ -28,10 +28,6 @@
 -author('alexey@process-one.net').
 -update_info({update, 0}).
 
--define(GEN_FSM, p1_fsm_old).
-
--behaviour(?GEN_FSM).
-
 %% External exports
 -export([start/2,
          stop/1,
@@ -65,135 +61,10 @@
 	 print_state/1]).
 
 -include("ejabberd.hrl").
+-include("ejabberd_c2s.hrl").
 -include("jlib.hrl").
--include("mod_privacy.hrl").
 
--define(SETS, gb_sets).
--define(DICT, dict).
--define(STREAM_MGMT_H_MAX, (1 bsl 32 - 1)).
--define(STREAM_MGMT_CACHE_MAX, 100).
-%% In fact, that's the denominator of the frequency...
--define(STREAM_MGMT_ACK_FREQ, 1).
--define(STREAM_MGMT_RESUME_TIMEOUT, 600).  %% seconds
--define(CONSTRAINT_CHECK_TIMEOUT, 5).  %% seconds
-
-%% pres_a contains all the presence available send (either through roster mechanism or directed).
-%% Directed presence unavailable remove user from pres_a.
--record(state, {socket,
-                sockmod :: ejabberd:sockmod(),
-                socket_monitor,
-                xml_socket,
-                streamid,
-                sasl_state,
-                access,
-                shaper,
-                zlib = {false, 0}          :: {boolean(), integer()},
-                tls = false           :: boolean(),
-                tls_required = false  :: boolean(),
-                tls_enabled = false   :: boolean(),
-                tls_options = [],
-                authenticated = false :: boolean(),
-                jid                  :: ejabberd:jid(),
-                user = <<>>          :: ejabberd:user(),
-                server = ?MYNAME     :: ejabberd:server(),
-                resource = <<>>      :: ejabberd:resource(),
-                sid                  :: ejabberd_sm:sid(),
-                %% We have _subscription to_ these users' presence status;
-                %% i.e. they send us presence updates.
-                %% This comes from the roster.
-                pres_t = ?SETS:new() :: gb_set(),
-                %% We have _subscription from_ these users,
-                %% i.e. they have subscription to us.
-                %% We send them presence updates.
-                %% This comes from the roster.
-                pres_f = ?SETS:new() :: gb_set(),
-                %% We're _available_ to these users,
-                %% i.e. we broadcast presence updates to them.
-                %% This may change throughout the session.
-                pres_a = ?SETS:new() :: gb_set(),
-                %% We are _invisible_ to these users.
-                %% This may change throughout the session.
-                pres_i = ?SETS:new() :: gb_set(),
-                pending_invitations = [],
-                pres_last, pres_pri,
-                pres_timestamp,
-                %% Are we invisible?
-                pres_invis = false :: boolean(),
-                privacy_list = #userlist{} :: mod_privacy:userlist(),
-                conn = unknown,
-                auth_module     :: ejabberd_auth:authmodule(),
-                ip              :: inet:ip_address(),
-                aux_fields = [] :: [{aux_key(), aux_value()}],
-                lang            :: ejabberd:lang(),
-                stream_mgmt = false,
-                stream_mgmt_in = 0,
-                stream_mgmt_id,
-                stream_mgmt_out_acked = 0,
-                stream_mgmt_buffer = [],
-                stream_mgmt_buffer_size = 0,
-                stream_mgmt_buffer_max = ?STREAM_MGMT_CACHE_MAX,
-                stream_mgmt_ack_freq = ?STREAM_MGMT_ACK_FREQ,
-                stream_mgmt_resume_timeout = ?STREAM_MGMT_RESUME_TIMEOUT,
-                stream_mgmt_resume_tref,
-                stream_mgmt_constraint_check_tref
-                }).
--type aux_key() :: atom().
--type aux_value() :: any().
--type state() :: #state{}.
-
--type statename() :: atom().
--type conntype() :: 'c2s'
-                  | 'c2s_compressed'
-                  | 'c2s_compressed_tls'
-                  | 'c2s_tls'
-                  | 'http_bind'
-                  | 'http_poll'
-                  | 'unknown'.
-
-%% FSM handler return value
--type fsm_return() :: {'stop', Reason :: 'normal', state()}
-                    | {'next_state', statename(), state()}
-                    | {'next_state', statename(), state(), Timeout :: integer()}.
-%-define(DBGFSM, true).
-
--ifdef(DBGFSM).
--define(FSMOPTS, [{debug, [trace]}]).
--else.
--define(FSMOPTS, []).
--endif.
-
-%% Module start with or without supervisor:
--ifdef(NO_TRANSIENT_SUPERVISORS).
--define(SUPERVISOR_START, ?GEN_FSM:start(ejabberd_c2s, [SockData, Opts],
-                                         fsm_limit_opts(Opts) ++ ?FSMOPTS)).
--else.
--define(SUPERVISOR_START, supervisor:start_child(ejabberd_c2s_sup,
-                                                 [SockData, Opts])).
--endif.
-
-%% This is the timeout to apply between event when starting a new
-%% session:
--define(C2S_OPEN_TIMEOUT, 60000).
--define(C2S_HIBERNATE_TIMEOUT, 90000).
-
--define(STREAM_HEADER,
-        "<?xml version='1.0'?>"
-        "<stream:stream xmlns='jabber:client' "
-        "xmlns:stream='http://etherx.jabber.org/streams' "
-        "id='~s' from='~s'~s~s>"
-       ).
-
--define(STREAM_TRAILER, "</stream:stream>").
-
--define(INVALID_NS_ERR, ?SERR_INVALID_NAMESPACE).
--define(INVALID_XML_ERR, ?SERR_XML_NOT_WELL_FORMED).
--define(HOST_UNKNOWN_ERR, ?SERR_HOST_UNKNOWN).
--define(POLICY_VIOLATION_ERR(Lang, Text),
-        ?SERRT_POLICY_VIOLATION(Lang, Text)).
--define(INVALID_FROM, ?SERR_INVALID_FROM).
--define(RESOURCE_CONSTRAINT_ERR(Lang, Text),
-	?SERRT_RESOURSE_CONSTRAINT(Lang, Text)).
-
+-behaviour(?GEN_FSM).
 
 %%%----------------------------------------------------------------------
 %%% API
@@ -208,7 +79,6 @@ start(SockData, Opts) ->
 start_link(SockData, Opts) ->
     ?GEN_FSM:start_link(ejabberd_c2s, [SockData, Opts],
                         fsm_limit_opts(Opts) ++ ?FSMOPTS).
-
 
 socket_type() ->
     xml_stream.
@@ -328,7 +198,8 @@ init([{SockMod, Socket}, Opts]) ->
                         Socket
                 end,
             SocketMonitor = SockMod:monitor(Socket1),
-            {ok, wait_for_stream, #state{socket         = Socket1,
+            {ok, wait_for_stream, #state{server         = ?MYNAME,
+                                         socket         = Socket1,
                                          sockmod        = SockMod,
                                          socket_monitor = SocketMonitor,
                                          xml_socket     = XMLSocket,
@@ -702,56 +573,9 @@ wait_for_feature_request({xmlstreamelement, El}, StateData) ->
 	{?NS_SASL, <<"auth">>} when TLSEnabled or not TLSRequired ->
 	    Mech = xml:get_attr_s(<<"mechanism">>, Attrs),
 	    ClientIn = jlib:decode_base64(xml:get_cdata(Els)),
-	    case cyrsasl:server_start(StateData#state.sasl_state,
-				      Mech,
-				      ClientIn) of
-		{ok, Props} ->
-		    (StateData#state.sockmod):reset_stream(
-		      StateData#state.socket),
-		    send_element(StateData,
-				  #xmlel{name = <<"success">>,
-				         attrs = [{<<"xmlns">>, ?NS_SASL}]}),
-		     U = xml:get_attr_s(username, Props),
-		     AuthModule = xml:get_attr_s(auth_module, Props),
-		     ?INFO_MSG("(~w) Accepted authentication for ~s by ~p",
-			       [StateData#state.socket, U, AuthModule]),
-		     fsm_next_state(wait_for_stream,
-				    StateData#state{
-				      streamid = new_id(),
-				      authenticated = true,
-				      auth_module = AuthModule,
-				      user = U});
-		{continue, ServerOut, NewSASLState} ->
-		    send_element(StateData,
-				 #xmlel{name = <<"challenge">>,
-				        attrs = [{<<"xmlns">>, ?NS_SASL}],
-				        children = [#xmlcdata{content = jlib:encode_base64(ServerOut)}]}),
-		    fsm_next_state(wait_for_sasl_response,
-				   StateData#state{
-				     sasl_state = NewSASLState});
-		{error, Error, Username} ->
-		    IP = peerip(StateData#state.sockmod, StateData#state.socket),
-		    ?INFO_MSG(
-		       "(~w) Failed authentication for ~s@~s from IP ~s (~w)",
-		       [StateData#state.socket,
-			Username, StateData#state.server, jlib:ip_to_list(IP), IP]),
-            ejabberd_hooks:run(auth_failed, StateData#state.server,
-                               [Username, StateData#state.server]),
-		    send_element(StateData,
-				 #xmlel{name = <<"failure">>,
-				        attrs = [{<<"xmlns">>, ?NS_SASL}],
-				        children = [#xmlel{name = Error}]}),
-		    {next_state, wait_for_feature_request, StateData,
-		     ?C2S_OPEN_TIMEOUT};
-		{error, Error} ->
-            ejabberd_hooks:run(auth_failed, StateData#state.server,
-                               [unknown, StateData#state.server]),
-		    send_element(StateData,
-				 #xmlel{name = <<"failure">>,
-				        attrs = [{<<"xmlns">>, ?NS_SASL}],
-				        children = [#xmlel{name = Error}]}),
-		    fsm_next_state(wait_for_feature_request, StateData)
-	    end;
+	    StepResult = cyrsasl:server_start(StateData#state.sasl_state, Mech, ClientIn),
+	    {NewFSMState, NewStateData} = handle_sasl_step(StateData, StepResult),
+	    fsm_next_state(NewFSMState, NewStateData);
 	{?NS_TLS_BIN, <<"starttls">>} when TLS == true,
 				   TLSEnabled == false,
 				   SockMod == gen_tcp ->
@@ -843,73 +667,9 @@ wait_for_sasl_response({xmlstreamelement, El}, StateData) ->
     case {xml:get_attr_s(<<"xmlns">>, Attrs), Name} of
 	{?NS_SASL, <<"response">>} ->
 	    ClientIn = jlib:decode_base64(xml:get_cdata(Els)),
-	    case cyrsasl:server_step(StateData#state.sasl_state,
-				     ClientIn) of
-		{ok, Props} ->
-		    (StateData#state.sockmod):reset_stream(
-		      StateData#state.socket),
-		    send_element(StateData,
-                         #xmlel{name = <<"success">>,
-                                attrs = [{"xmlns", ?NS_SASL}]
-                               }),
-		    U = xml:get_attr_s(username, Props),
-		    AuthModule = xml:get_attr_s(auth_module, Props),
-		    ?INFO_MSG("(~w) Accepted authentication for ~s by ~p",
-			      [StateData#state.socket, U, AuthModule]),
-		    fsm_next_state(wait_for_stream,
-				   StateData#state{
-				     streamid = new_id(),
-				     authenticated = true,
-				     auth_module = AuthModule,
-				     user = U});
-		{ok, Props, ServerOut} ->
-		    (StateData#state.sockmod):reset_stream(
-		      StateData#state.socket),
-		    send_element(StateData,
-                         #xmlel{name = <<"success">>,
-                                attrs = [{"xmlns", ?NS_SASL}],
-                                children = [{xmlcdata,
-                                             jlib:encode_base64(ServerOut)}]}
-                        ),
-		    U = xml:get_attr_s(username, Props),
-		    AuthModule = xml:get_attr_s(auth_module, Props),
-		    ?INFO_MSG("(~w) Accepted authentication for ~s by ~p",
-			      [StateData#state.socket, U, AuthModule]),
-		    fsm_next_state(wait_for_stream,
-				   StateData#state{
-				     streamid = new_id(),
-				     authenticated = true,
-				     auth_module = AuthModule,
-				     user = U});
-		{continue, ServerOut, NewSASLState} ->
-		    send_element(StateData,
-				 #xmlel{name = <<"challenge">>,
-				        attrs = [{<<"xmlns">>, ?NS_SASL}],
-				        children = [#xmlcdata{content = jlib:encode_base64(ServerOut)}]}),
-		    fsm_next_state(wait_for_sasl_response,
-		     StateData#state{sasl_state = NewSASLState});
-		{error, Error, Username} ->
-		    IP = peerip(StateData#state.sockmod, StateData#state.socket),
-		    ?INFO_MSG(
-		       "(~w) Failed authentication for ~s@~s from IP ~s (~w)",
-		       [StateData#state.socket,
-			Username, StateData#state.server, jlib:ip_to_list(IP), IP]),
-            ejabberd_hooks:run(auth_failed, StateData#state.server,
-                               [Username, StateData#state.server]),
-		    send_element(StateData,
-				 #xmlel{name = <<"failure">>,
-				        attrs = [{<<"xmlns">>, ?NS_SASL}],
-				        children = [#xmlel{name = Error}]}),
-		    fsm_next_state(wait_for_feature_request, StateData);
-		{error, Error} ->
-            ejabberd_hooks:run(auth_failed, StateData#state.server,
-                               [unknown, StateData#state.server]),
-		    send_element(StateData,
-				 #xmlel{name = <<"failure">>,
-				        attrs = [{<<"xmlns">>, ?NS_SASL}],
-				        children = [#xmlel{name = Error}]}),
-		    fsm_next_state(wait_for_feature_request, StateData)
-	    end;
+	    StepResult = cyrsasl:server_step(StateData#state.sasl_state,ClientIn),
+	    {NewFSMState, NewStateData} = handle_sasl_step(StateData, StepResult),
+	    fsm_next_state(NewFSMState, NewStateData);
 	_ ->
 	    process_unauthenticated_stanza(StateData, El),
 	    fsm_next_state(wait_for_feature_request, StateData)
@@ -1110,6 +870,7 @@ session_established({xmlstreamelement, El}, StateData) ->
 						   StateData),
       check_amp_maybe_send(FromJID#jid.lserver, NewState, {FromJID, El})
     end;
+
 %% We hibernate the process to reduce memory consumption after a
 %% configurable activity timeout
 session_established(timeout, StateData) ->
@@ -1717,12 +1478,10 @@ change_shaper(StateData, JID) ->
 
 
 -spec send_text(state(), Text :: binary()) -> any().
-send_text(StateData, Text) when StateData#state.xml_socket ->
-    ?DEBUG("Send Text on stream = ~p", [lists:flatten(Text)]),
-    (StateData#state.sockmod):send_xml(StateData#state.socket,
-                                       {xmlstreamraw, Text});
 send_text(StateData, Text) ->
     ?DEBUG("Send XML on stream = ~p", [Text]),
+    Size = size(Text),
+    mongoose_metrics:update([data, xmpp, sent, xml_stanza_size], Size),
     (StateData#state.sockmod):send(StateData#state.socket, Text).
 
 -spec maybe_send_element_safe(state(), El :: jlib:xmlel()) -> any().
@@ -1784,11 +1543,11 @@ send_header(StateData, Server, Version, Lang) ->
             "" -> "";
             _ -> [" xml:lang='", Lang, "'"]
         end,
-    Header = io_lib:format(?STREAM_HEADER,
+    Header = list_to_binary(io_lib:format(?STREAM_HEADER,
                            [StateData#state.streamid,
                             Server,
                             VersionStr,
-                            LangStr]),
+                            LangStr])),
     send_text(StateData, Header).
 
 -spec maybe_send_trailer_safe(State :: state()) -> any().
@@ -1895,9 +1654,7 @@ process_presence_probe(From, To, StateData) ->
                     Packet = xml:append_subtags(
                                StateData#state.pres_last,
                                %% To is the one sending the presence (the target of the probe)
-                               [jlib:timestamp_to_xml(Timestamp, utc, To, <<>>),
-                                %% TODO: Delete the next line once XEP-0091 is Obsolete
-                                jlib:timestamp_to_xml(Timestamp)]),
+                               [jlib:timestamp_to_xml(Timestamp, utc, To, <<>>)]),
                     case privacy_check_packet(StateData, To, From, Packet, out) of
                         deny ->
                             ok;
@@ -3082,15 +2839,13 @@ add_timestamp({_,_,Micro} = TimeStamp, Server, Packet) ->
     Time = {D,{H,M,S, Micro}},
     case xml:get_subtag(Packet, <<"delay">>) of
         false ->
-            %% TODO: Delete the next element once XEP-0091 is Obsolete
-            TimeStampLegacyXML = timestamp_legacy_xml(Server, Time),
-            TimeStampXML = jlib:timestamp_to_xml(Time),
-            xml:append_subtags(Packet, [TimeStampLegacyXML, TimeStampXML]);
+            TimeStampXML = timestamp_xml(Server, Time),
+            xml:append_subtags(Packet, [TimeStampXML]);
         _ ->
             Packet
     end.
 
-timestamp_legacy_xml(Server, Time) ->
+timestamp_xml(Server, Time) ->
     FromJID = jlib:make_jid(<<>>, Server, <<>>),
     jlib:timestamp_to_xml(Time, utc, FromJID, <<"SM Storage">>).
 
@@ -3101,207 +2856,61 @@ defer_resource_constraint_check(#state{stream_mgmt_constraint_check_tref = undef
 defer_resource_constraint_check(State)->
     State.
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--compile([export_all]).
--define(_eq(E, I), ?_assertEqual(E, I)).
--define(eq(E, I), ?assertEqual(E, I)).
--define(ne(E, I), ?assert(E =/= I)).
+sasl_success_stanza(ServerOut) ->
+    C = case ServerOut of
+            undefined -> [];
+            _ -> [#xmlcdata{content = jlib:encode_base64(ServerOut)}]
+        end,
+    #xmlel{name = <<"success">>,
+           attrs = [{<<"xmlns">>, ?NS_SASL}],
+           children = C}.
 
-%%
-%% Tests
-%%
+sasl_failure_stanza(Error) ->
+    #xmlel{name = <<"failure">>,
+           attrs = [{<<"xmlns">>, ?NS_SASL}],
+           children = [#xmlel{name = Error}]}.
 
-increment_sm_incoming_test_() ->
-    [?LET(I, fun increment_sm_incoming/1,
-	  [?_eq(1,        I(0)),
-	   ?_eq(2,        I(1)),
-	   ?_eq(3,        I(2)),
-	   ?_eq(10000000, I(9999999)),
-	   ?_eq(0,        I(?STREAM_MGMT_H_MAX))]),
-     ?LET(I, fun increment_sm_counter/2,
-	  [?_eq(4,        I(?STREAM_MGMT_H_MAX, 5))])].
+sasl_challenge_stanza(Challenge) ->
+    #xmlel{name = <<"challenge">>,
+           attrs = [{<<"xmlns">>, ?NS_SASL}],
+           children = Challenge}.
 
-calc_to_drop_test_() ->
-    C = fun calc_to_drop/2,
-    [?_eq(0, C(0, 0)),
-     ?_eq(1, C(2, 1)),
-     ?_eq(2, C(5, 3)),
-     ?_eq(4, C(2, ?STREAM_MGMT_H_MAX - 1))].
+handle_sasl_success(State, Props) ->
+    handle_sasl_success(State, Props, undefined).
+handle_sasl_success(State, Props, ServerOut) ->
+     (State#state.sockmod):reset_stream(State#state.socket),
+     send_element(State, sasl_success_stanza(ServerOut)),
+     U = xml:get_attr_s(username, Props),
+     AuthModule = xml:get_attr_s(auth_module, Props),
+     ?INFO_MSG("(~w) Accepted authentication for ~s by ~p",
+               [State#state.socket, U, AuthModule]),
+     NewState = State#state{
+              streamid = new_id(),
+              authenticated = true,
+              auth_module = AuthModule,
+              user = U},
+     {wait_for_stream, NewState}.
 
-drop_last_test_() ->
-    D = fun drop_last/2,
-    [?_eq({0, []},        D(0, [])),
-     ?_eq({1, []},        D(1, [1])),
-     ?_eq({2, []},        D(2, [1, 2])),
-     ?_eq({0, [1, 2]},    D(0, [1, 2])),
-     ?_eq({0, []},        D(2, [])),
-     ?_eq({1, [1]},       D(1, [1, 2])),
-     ?_eq({3, [1, 2, 3]}, D(3, [1, 2, 3, 4, 5, 6])),
-     ?_eq({6, []},        D(7, [1, 2, 3, 4, 5, 6]))].
-
-buffer_outgoing_test_() ->
-    {setup, fun create_c2s/0, fun cleanup_c2s/1,
-     {with, [fun starts_with_empty_buffer/1,
-	     fun buffer_outgoing/1]}}.
-
-client_ack_test_() ->
-    {setup, fun create_c2s/0, fun cleanup_c2s/1,
-     {with, [fun starts_with_empty_buffer/1,
-	     fun buffer_outgoing/1,
-	     fun buffer_outgoing/1,
-	     fun buffer_outgoing/1,
-	     fun buffer_outgoing/1,
-	     mk_assert_acked(0),
-	     mk_client_ack(3)]}}.
-
-no_buffer_test_() ->
-    {setup, fun () -> c2s_initial_state(mgmt_on) end,
-     {with, [fun (State0) ->
-		     State = State0#state{stream_mgmt_buffer_max = infinity},
-		     ?eq([], State#state.stream_mgmt_buffer),
-		     NewState = buffer_out_stanza(fake_packet, State),
-		     ?eq([fake_packet], NewState#state.stream_mgmt_buffer)
-	     end,
-	     fun (State0) ->
-		     State = State0#state{stream_mgmt_buffer_max = no_buffer},
-		     ?eq([], State#state.stream_mgmt_buffer),
-		     NewState = buffer_out_stanza(fake_packet, State),
-		     ?eq([], NewState#state.stream_mgmt_buffer)
-	     end]}}.
-
-enable_stream_resumption_test_() ->
-    {setup,
-     %% Mecked fun must send a message to the test runner to synchronize;
-     %% to write that fun we must know this process's pid beforehand;
-     %% we know self() beforehand, so run the test in the current process.
-     local,
-     fun () ->
-             Self = self(),
-             meck:new(mod_stream_management, []),
-             meck:expect(mod_stream_management, get_buffer_max,
-                         fun (_) -> 100 end),
-             meck:expect(mod_stream_management, get_ack_freq,
-                         fun (_) -> 1 end),
-             meck:expect(mod_stream_management, get_resume_timeout,
-                         fun (DefaultValue) -> DefaultValue end),
-             meck:expect(mod_stream_management, register_smid,
-                         fun (_SMID, _SID) ->
-                                 Self ! register_smid_called,
-                                 ok
-                         end),
-             create_c2s(c2s_initial_state())
-     end,
-     fun (C2S) ->
-             cleanup_c2s(C2S),
-             meck:unload(mod_stream_management)
-     end,
-     {with, [fun (C2S) ->
-                     Enable = #xmlel{name = <<"enable">>,
-                                     attrs = [{<<"xmlns">>, ?NS_STREAM_MGNT_3},
-                                              {<<"resume">>, <<"true">>}]},
-                     ?GEN_FSM:send_event(C2S, {xmlstreamelement, Enable}),
-                     receive
-                         register_smid_called ->
-                             ?assert(meck:called(mod_stream_management,
-                                                 register_smid, 2)),
-                             S = status_to_state(sys:get_status(C2S)),
-                             ?ne(undefined, S#state.stream_mgmt_id)
-                     after 1000 ->
-                               error("SMID not registered")
-                     end
-             end]}}.
-
-%%
-%% Helpers
-%%
-
-create_c2s() ->
-    create_c2s(c2s_initial_state(mgmt_on)).
-
-create_c2s(State) ->
-    meck:new(ejabberd_sm),
-    meck:expect(ejabberd_sm, close_session, fun(_SID, _User, _Server, _Resource) -> ok end),
-    meck:new(ejabberd_socket),
-    meck:expect(ejabberd_socket, close,
-		fun(_) ->
-			?ERROR_MSG("socket closed too early!~n", [])
-		end),
-    meck:expect(ejabberd_socket, send, fun(_,_) -> ok end),
-    meck:new(ejabberd_hooks),
-    meck:expect(ejabberd_hooks, run, fun(_,_) -> ok end),
-    meck:expect(ejabberd_hooks, run, fun(_,_,_) -> ok end),
-    meck:expect(ejabberd_hooks, run_fold,
-		fun(privacy_check_packet, _, _, _) -> allow end),
-    F = fun() ->
-		?GEN_FSM:enter_loop(?MODULE, [], session_established, State)
-	end,
-    proc_lib:spawn_link(F).
-
-c2s_initial_state(mgmt_on) ->
-    S = c2s_initial_state(),
-    S#state{stream_mgmt = true}.
-
-c2s_initial_state() ->
-    Jid = jid(<<"qwe@localhost/eunit">>),
-    {U, S, R} = {<<"qwe">>, <<"localhost">>, <<"eunit">>},
-    #state{jid = Jid,
-	   user = U, server = S, resource = R,
-	   sockmod = ejabberd_socket}.
-
-cleanup_c2s(C2S) when is_pid(C2S) ->
-    exit(C2S, normal),
-    meck:unload(ejabberd_hooks),
-    meck:unload(ejabberd_socket),
-    meck:unload(ejabberd_sm).
-
-starts_with_empty_buffer(C2S) ->
-    S = status_to_state(sys:get_status(C2S)),
-    ?eq(0, length(S#state.stream_mgmt_buffer)).
-
-buffer_outgoing(C2S) ->
-    S1 = status_to_state(sys:get_status(C2S)),
-    BufferSize = length(S1#state.stream_mgmt_buffer),
-    C2S ! {route, jid(<<"asd@localhost">>), jid(<<"qwe@localhost">>), message(<<"hi">>)},
-    S2 = status_to_state(sys:get_status(C2S)),
-    ?eq(BufferSize+1, length(S2#state.stream_mgmt_buffer)).
-
-status_to_state({status, _Pid, {module, ?GEN_FSM}, Data}) ->
-    [_, _, _, _, [{_, _}, {_, _}, {_, [{"StateData", State}]}]] = Data,
-    State.
-
-jid(Str) ->
-    jlib:binary_to_jid(Str).
-
-message(Content) ->
-    Body = #xmlel{name = <<"body">>,
-                  children = [#xmlcdata{content = Content}]},
-    #xmlel{name = <<"message">>,
-           attrs = [{<<"type">>, "chat"}],
-           children = [Body]}.
-
-mk_assert_acked(X) ->
-    fun(C2S) ->
-	    S = status_to_state(sys:get_status(C2S)),
-	    ?eq(X, S#state.stream_mgmt_out_acked)
+handle_sasl_step(#state{server = Server, socket= Sock} = State, StepRes) ->
+    case StepRes of
+        {ok, Props} ->
+            handle_sasl_success(State, Props);
+        {ok, Props, ServerOut} ->
+            handle_sasl_success(State, Props, ServerOut);
+        {continue, ServerOut, NewSASLState} ->
+            Challenge  = [#xmlcdata{content = jlib:encode_base64(ServerOut)}],
+            send_element(State, sasl_challenge_stanza(Challenge)),
+            {wait_for_sasl_response, State#state{sasl_state = NewSASLState}};
+        {error, Error, Username} ->
+            IP = peerip(State#state.sockmod, Sock),
+            ?INFO_MSG(
+               "(~w) Failed authentication for ~s@~s from IP ~s (~w)",
+               [Sock, Username, Server, jlib:ip_to_list(IP), IP]),
+            ejabberd_hooks:run(auth_failed, Server, [Username, Server]),
+            send_element(State, sasl_failure_stanza(Error)),
+            {wait_for_feature_request, State};
+        {error, Error} ->
+            ejabberd_hooks:run(auth_failed, Server, [unknown, Server]),
+            send_element(State, sasl_failure_stanza(Error)),
+            {wait_for_feature_request, State}
     end.
-
-mk_client_ack(H) ->
-    fun(C2S) ->
-	    S1 = status_to_state(sys:get_status(C2S)),
-	    Acked = S1#state.stream_mgmt_out_acked,
-	    BufferSize = length(S1#state.stream_mgmt_buffer),
-	    H = 3,
-	    ?eq(BufferSize, length(S1#state.stream_mgmt_buffer)),
-	    C2S ! {'$gen_event', {xmlstreamelement, ack(H)}},
-	    S2 = status_to_state(sys:get_status(C2S)),
-	    ?eq(H, S2#state.stream_mgmt_out_acked),
-	    ?eq(BufferSize - (H - Acked), length(S2#state.stream_mgmt_buffer))
-    end.
-
-ack(H) ->
-    #xmlel{name = <<"a">>,
-           attrs = [{<<"xmlns">>, ?NS_STREAM_MGNT_3},
-                    {<<"h">>, integer_to_binary(H)}]}.
-
--endif.
